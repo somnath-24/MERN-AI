@@ -28,34 +28,64 @@ if (MONGO_URI) {
 // AI Service Helper
 const callGroq = async (messages: any[]) => {
   const GROQ_API_KEY = process.env.GROQ_API_KEY;
-  if (!GROQ_API_KEY) {
-    throw new Error("GROQ_API_KEY is missing");
+  if (!GROQ_API_KEY || GROQ_API_KEY === "") {
+    throw new Error("GROQ_API_KEY is missing. Please add it to your Secrets.");
   }
 
-  const response = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
-    model: "llama-3.3-70b-versatile",
-    messages,
-    response_format: { type: "json_object" }
-  }, {
-    headers: {
-      "Authorization": `Bearer ${GROQ_API_KEY}`,
-      "Content-Type": "application/json"
+  try {
+    const response = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
+      model: "llama-3.3-70b-versatile",
+      messages,
+      response_format: { type: "json_object" }
+    }, {
+      headers: {
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      timeout: 30000 // 30 seconds timeout
+    });
+    
+    let content = response.data.choices[0].message.content;
+    // Clean up potential markdown blocks if present
+    content = content.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+    
+    // Basic validation to ensure it's at least valid JSON
+    try {
+      JSON.parse(content);
+    } catch (e) {
+      console.error("AI returned invalid JSON:", content);
+      throw new Error("AI generated malformed data. Please try again.");
     }
-  });
-
-  return response.data.choices[0].message.content;
+    
+    return content;
+  } catch (error: any) {
+    if (error.message === "AI generated malformed data. Please try again.") {
+      throw error;
+    }
+    console.error("Groq API Error:", error.response?.data || error.message);
+    throw new Error(error.response?.data?.error?.message || "Failed to communicate with Groq AI");
+  }
 };
 
 // API Routes
 app.post("/api/ai/roadmap", async (req, res) => {
   const { focus, level, userId } = req.body;
   try {
+    let levelContext = "";
+    if (level === 'basics') {
+      levelContext = "The user is a beginner. Start from the absolute basics like variables, data types, and simple functions. Focus on foundational concepts.";
+    } else if (level === 'intermediate') {
+      levelContext = "The user is at an intermediate level. Skip basic syntax. Start from asynchronous programming, DOM manipulation, and Express.js basics. Focus on building functional features.";
+    } else if (level === 'advanced') {
+      levelContext = "The user is advanced. Skip basics and intermediate concepts. Focus on advanced patterns, performance optimization, security, and complex architecture (e.g., microservices, advanced React patterns, system design).";
+    }
+
     const prompt = `Generate a structured full-stack JavaScript roadmap for a ${level} level learner focusing on ${focus}. 
+    ${levelContext}
     Return a JSON object with two arrays: "frontend" and "backend". 
     Each array should contain objects with a "title" property.
-    Frontend topics should include: DOM, Events, Fetch API, Promises, Async/Await, LocalStorage, ES6+.
-    Backend topics should include: Node.js, modules, fs, http, Express.js, REST APIs, middleware.
-    Adapt the depth based on the level.`;
+    Ensure the topics are relevant to the ${level} level and the ${focus} focus.
+    If focus is "Frontend JS", provide more frontend topics. If "Node.js & Backend", provide more backend topics. If "Both", provide a balanced mix.`;
 
     const result = await callGroq([
       { role: "system", content: "You are a JavaScript mentor for full-stack developers. Output JSON only." },
@@ -75,6 +105,7 @@ app.post("/api/ai/roadmap", async (req, res) => {
 
     res.json(data);
   } catch (error: any) {
+    console.error("Roadmap Route Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -101,35 +132,53 @@ app.post("/api/ai/practice", async (req, res) => {
 });
 
 app.post("/api/ai/teach", async (req, res) => {
-  const { topic } = req.body;
+  const { topic, level } = req.body;
+  if (!topic) {
+    return res.status(400).json({ error: "Topic is required" });
+  }
   try {
-    const prompt = `Provide a clear, intermediate-to-advanced explanation for the JavaScript topic: "${topic}".
-    Include:
-    1. Clear explanation (no basics).
-    2. Annotated frontend + backend code snippets.
-    3. A real-world mini-project snippet.
-    4. Common mistakes.
-    5. Two practice exercises.
-    Return a JSON object with fields: "explanation", "codeSnippets", "miniProject", "commonMistakes", "exercises".`;
+    const prompt = `Explain "${topic}" in MERN stack for a ${level || 'intermediate'} level learner.
+    Provide:
+    1. Concise explanation tailored to ${level || 'intermediate'} level.
+    2. Frontend (React) + Backend (Node) snippets.
+    3. Mini-project snippet.
+    4. 2 common mistakes.
+    5. 2 exercises.
+    Output JSON: {"explanation": "...", "codeSnippets": {"frontend": "...", "backend": "..."}, "miniProject": "...", "commonMistakes": [], "exercises": []}`;
 
     const result = await callGroq([
       { role: "system", content: "You are a JavaScript mentor. Output JSON only." },
       { role: "user", content: prompt }
     ]);
 
-    res.json(JSON.parse(result));
+    const data = JSON.parse(result);
+    
+    // Ensure all fields exist to prevent UI crashes
+    const validatedData = {
+      explanation: data.explanation || "No explanation available.",
+      codeSnippets: {
+        frontend: data.codeSnippets?.frontend || "// No frontend code available",
+        backend: data.codeSnippets?.backend || "// No backend code available"
+      },
+      miniProject: data.miniProject || "No mini-project idea available.",
+      commonMistakes: Array.isArray(data.commonMistakes) ? data.commonMistakes : [],
+      exercises: Array.isArray(data.exercises) ? data.exercises : []
+    };
+    
+    res.json(validatedData);
   } catch (error: any) {
+    console.error("Teach Route Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 app.post("/api/ai/chat", async (req, res) => {
-  const { messages } = req.body;
+  const { messages, level } = req.body;
   try {
     const response = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
       model: "llama-3.3-70b-versatile",
       messages: [
-        { role: "system", content: "You are a JavaScript mentor for full-stack developers. Help with debugging, concept explanations, and comparisons between Browser and Node.js environments." },
+        { role: "system", content: `You are a JavaScript mentor for full-stack developers. The user is at a ${level || 'intermediate'} level. Help with debugging, concept explanations, and comparisons between Browser and Node.js environments. Keep answers concise and technical.` },
         ...messages
       ]
     }, {
