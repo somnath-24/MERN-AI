@@ -1,0 +1,36 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap');
+
+@theme {
+  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: #06060a;
+  --color-accent-frontend: #e8ff5a;
+  --color-accent-backend: #5ab4ff;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: #ffffff;
+  font-family: var(--font-sans);
+}
+
+.clash-display {
+  font-family: "Instrument Sans", sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #06060a;
+}
+::-webkit-scrollbar-thumb {
+  background: #1a1a24;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a3a;
+}
